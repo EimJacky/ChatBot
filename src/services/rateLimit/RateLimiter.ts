@@ -1,0 +1,98 @@
+import { AppError } from '../../utils/errors.js';
+
+interface Bucket {
+  count: number;
+  resetAt: number;
+}
+
+export interface RateLimiterRule {
+  max: number;
+  windowMs: number;
+}
+
+export class FixedWindowRateLimiter {
+  private readonly buckets = new Map<string, Bucket>();
+
+  constructor(private readonly rule: RateLimiterRule) {}
+
+  check(key: string, label = 'requests'): void {
+    const now = Date.now();
+    const bucket = this.buckets.get(key);
+
+    if (!bucket || bucket.resetAt <= now) {
+      this.buckets.set(key, { count: 1, resetAt: now + this.rule.windowMs });
+      return;
+    }
+
+    if (bucket.count >= this.rule.max) {
+      const retrySeconds = Math.ceil((bucket.resetAt - now) / 1_000);
+      throw new AppError(
+        `Rate limit reached for ${label}. Try again in ${retrySeconds}s.`,
+        'RATE_LIMITED',
+      );
+    }
+
+    bucket.count += 1;
+  }
+
+  getStats() {
+    return {
+      keys: this.buckets.size,
+      max: this.rule.max,
+      windowMs: this.rule.windowMs,
+    };
+  }
+}
+
+export class DailyCounterLimiter {
+  private readonly buckets = new Map<string, Bucket>();
+  private readonly windowMs = 24 * 60 * 60 * 1_000;
+
+  constructor(private readonly max: number) {}
+
+  check(key: string): void {
+    const now = Date.now();
+    const bucket = this.buckets.get(key);
+
+    if (!bucket || bucket.resetAt <= now) {
+      this.buckets.set(key, { count: 1, resetAt: now + this.windowMs });
+      return;
+    }
+
+    if (bucket.count >= this.max) {
+      throw new AppError('Daily mention limit reached. Please use /chat instead.', 'RATE_LIMITED');
+    }
+
+    bucket.count += 1;
+  }
+
+  getStats() {
+    return {
+      keys: this.buckets.size,
+      max: this.max,
+      windowMs: this.windowMs,
+    };
+  }
+}
+
+export class BotRateLimiters {
+  constructor(
+    public readonly user: FixedWindowRateLimiter,
+    public readonly channel: FixedWindowRateLimiter,
+    public readonly mentionDaily: DailyCounterLimiter,
+  ) {}
+
+  checkChat(userId: string, channelId: string): void {
+    this.user.check(userId, 'user');
+    this.channel.check(channelId, 'channel');
+  }
+
+  getStats() {
+    return {
+      user: this.user.getStats(),
+      channel: this.channel.getStats(),
+      mentionDaily: this.mentionDaily.getStats(),
+    };
+  }
+}
+

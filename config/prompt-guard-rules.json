@@ -1,0 +1,11 @@
+{
+  "denyPatterns": [
+    "(?i)ignore\\s+(all\\s+)?(previous|prior|above)\\s+(instructions|rules)",
+    "(?i)reveal\\s+(your\\s+)?(system|developer)\\s+(prompt|instructions)",
+    "(?i)print\\s+(the\\s+)?(system|developer)\\s+(prompt|instructions)",
+    "(?i)you\\s+are\\s+now\\s+(in\\s+)?(developer|admin|root)\\s+mode",
+    "(?i)override\\s+(the\\s+)?system\\s+(prompt|instructions)"
+  ],
+  "denyMessage": "I cannot help override or reveal system instructions, but I can still help with your actual question."
+}
+
