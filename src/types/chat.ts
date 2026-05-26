@@ -25,6 +25,7 @@ export interface ChatResult {
 
 export interface StreamCallbacks {
   onToken?: (token: string) => Promise<void> | void;
+  onSearchStart?: () => Promise<void> | void;
+  onSearchEnd?: () => Promise<void> | void;
   signal?: AbortSignal;
 }
-

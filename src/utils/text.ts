@@ -1,7 +1,9 @@
 const DISCORD_MESSAGE_LIMIT = 2000;
 
 export function cleanDiscordText(input: string): string {
-  return input
+  const withoutToolCalls = stripPseudoToolCalls(input);
+
+  return withoutToolCalls
     .replace(new RegExp(String.fromCharCode(0), 'g'), '')
     .replace(/@everyone/g, '@\u200beveryone')
     .replace(/@here/g, '@\u200bhere')
@@ -27,4 +29,11 @@ export function stripBotMention(content: string, botUserId: string): string {
   return content
     .replace(new RegExp(`<@!?${botUserId}>`, 'g'), '')
     .trim();
+}
+
+function stripPseudoToolCalls(input: string): string {
+  return input
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/<function=[\s\S]*?<\/function>/gi, '')
+    .replace(/<parameter=[\s\S]*?<\/parameter>/gi, '');
 }

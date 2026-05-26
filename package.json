@@ -11,6 +11,7 @@
     "register": "tsx src/register-commands.ts",
     "doctor": "tsx src/doctor.ts",
     "lint": "eslint .",
+    "secrets:check": "node scripts/check-secrets.mjs",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

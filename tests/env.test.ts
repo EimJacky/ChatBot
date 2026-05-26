@@ -58,4 +58,34 @@ describe('loadEnv', () => {
       }),
     ).toThrow();
   });
+
+  it('loads app-side search settings', () => {
+    const env = loadEnv({
+      ...baseEnv,
+      SEARCH_ENABLED: 'true',
+      SEARCH_API_KEY: 'search-key',
+      SEARCH_DAILY_LIMIT: '100',
+      SEARCH_DAILY_WARNING_RATIO: '0.8',
+      SEARCH_LLM_INTENT_ENABLED: 'true',
+    });
+
+    expect(env.appSearch).toMatchObject({
+      enabled: true,
+      provider: 'tavily',
+      apiKey: 'search-key',
+      resultLimit: 2,
+      dailyLimit: 100,
+      dailyWarningRatio: 0.8,
+      llmIntentEnabled: true,
+    });
+  });
+
+  it('rejects invalid app-side search ratios', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        SEARCH_DAILY_WARNING_RATIO: '2',
+      }),
+    ).toThrow();
+  });
 });

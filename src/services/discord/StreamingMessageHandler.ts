@@ -44,6 +44,7 @@ export class StreamingMessageHandler {
         this.flushTimer = undefined;
         void this.flush(reply);
       }, this.intervalMs - (now - this.lastFlushAt));
+      this.flushTimer.unref();
     }
   }
 
@@ -70,4 +71,3 @@ export class StreamingMessageHandler {
     await this.limiter.schedule(() => reply.editReply(text));
   }
 }
-

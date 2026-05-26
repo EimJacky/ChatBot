@@ -10,6 +10,30 @@ export class AppError extends Error {
   }
 }
 
+export interface HttpError extends Error {
+  status: number;
+  code?: string;
+}
+
+export function createHttpError(
+  message: string,
+  status: number,
+  code?: string,
+  cause?: unknown,
+): HttpError {
+  const error = new Error(message, { cause }) as HttpError;
+  error.name = 'HttpError';
+  error.status = status;
+  if (code) {
+    error.code = code;
+  }
+  return error;
+}
+
+export function isHttpError(error: unknown): error is HttpError {
+  return error instanceof Error && 'status' in error && typeof error.status === 'number';
+}
+
 export function toAppError(error: unknown, fallbackCode = 'UNKNOWN_ERROR'): AppError {
   if (error instanceof AppError) {
     return error;
@@ -42,4 +66,3 @@ export function userFacingError(error: unknown): string {
       return 'Something went wrong while handling that request.';
   }
 }
-

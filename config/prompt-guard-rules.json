@@ -3,9 +3,15 @@
     "(?i)ignore\\s+(all\\s+)?(previous|prior|above)\\s+(instructions|rules)",
     "(?i)reveal\\s+(your\\s+)?(system|developer)\\s+(prompt|instructions)",
     "(?i)print\\s+(the\\s+)?(system|developer)\\s+(prompt|instructions)",
+    "(?i)(show|display|dump|write)\\s+(your\\s+)?(system|developer)\\s+(prompt|instructions)",
+    "(?i)markdown\\s+(code\\s+block|block).*?(system|developer)\\s+(prompt|instructions)",
+    "(?i)pretend\\s+(to\\s+be|you\\s+are).*?(developer|admin|root)",
     "(?i)you\\s+are\\s+now\\s+(in\\s+)?(developer|admin|root)\\s+mode",
-    "(?i)override\\s+(the\\s+)?system\\s+(prompt|instructions)"
+    "(?i)override\\s+(the\\s+)?system\\s+(prompt|instructions)",
+    "从现在开始忽略.*(规则|指令|提示)",
+    "忽略(上面|之前|先前|所有).*(规则|指令|提示)",
+    "(展示|显示|打印|输出).*(系统|开发者).*(提示|指令)",
+    "假装.*(开发者|管理员|root|系统).*模式"
   ],
   "denyMessage": "I cannot help override or reveal system instructions, but I can still help with your actual question."
 }
-

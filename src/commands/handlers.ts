@@ -8,33 +8,36 @@ export async function handleChatCommand(interaction: ChatInputCommandInteraction
 }
 
 export async function handleResetCommand(interaction: ChatInputCommandInteraction, container: Container) {
+  await interaction.deferReply({ ephemeral: true });
   container.contextManager.reset(interaction.channelId);
-  await interaction.reply({ content: 'Context reset for this channel.', ephemeral: true });
+  await interaction.editReply('Context reset for this channel.');
 }
 
 export async function handleStatsCommand(interaction: ChatInputCommandInteraction, container: Container) {
+  await interaction.deferReply({ ephemeral: true });
   const stats = container.contextManager.getStats(interaction.channelId);
-  await interaction.reply({
-    content: [
+  await interaction.editReply(
+    [
       `Messages: ${stats.messages}`,
       `Estimated tokens: ${stats.estimatedTokens}`,
       `Active channels: ${stats.activeChannels}`,
       `Context window: ${stats.contextWindowTokens}`,
     ].join('\n'),
-    ephemeral: true,
-  });
+  );
 }
 
 export async function handlePingCommand(interaction: ChatInputCommandInteraction) {
-  await interaction.reply({ content: `Pong. WebSocket ping: ${interaction.client.ws.ping}ms`, ephemeral: true });
+  await interaction.deferReply({ ephemeral: true });
+  await interaction.editReply(`Pong. WebSocket ping: ${interaction.client.ws.ping}ms`);
 }
 
 export async function handleModelsCommand(interaction: ChatInputCommandInteraction, container: Container) {
+  await interaction.deferReply({ ephemeral: true });
   const env = container.env;
   const diagnostics = container.aiService.getLastDiagnostics();
   const capabilities = container.aiProvider.getCapabilities(env.aiModel);
-  await interaction.reply({
-    content: [
+  await interaction.editReply(
+    [
       `Provider: ${diagnostics.provider}`,
       `Model: ${env.aiModel}`,
       `Fallback: ${env.aiFallbackModel ?? 'none'}`,
@@ -50,13 +53,27 @@ export async function handleModelsCommand(interaction: ChatInputCommandInteracti
       `Supports thinking: ${capabilities.supportsThinking}`,
       `Supports annotations: ${capabilities.supportsAnnotations}`,
     ].join('\n'),
-    ephemeral: true,
-  });
+  );
 }
 
 export async function handleDebugCommand(interaction: ChatInputCommandInteraction, container: Container) {
+  await interaction.deferReply({ ephemeral: true });
+  container.logger.warn(
+    {
+      userId: interaction.user.id,
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+    },
+    'debug command requested',
+  );
+
+  if (!container.env.debugCommandEnabled) {
+    await interaction.editReply('Debug command is disabled.');
+    return;
+  }
+
   if (!container.env.botOwnerIds.has(interaction.user.id)) {
-    await interaction.reply({ content: 'This command is restricted to the bot owner.', ephemeral: true });
+    await interaction.editReply('This command is restricted to the bot owner.');
     return;
   }
 
@@ -64,9 +81,10 @@ export async function handleDebugCommand(interaction: ChatInputCommandInteractio
   const contextStats = container.contextManager.getStats();
   const limiterStats = container.rateLimiters.getStats();
   const diagnostics = container.aiService.getLastDiagnostics();
+  const searchDiagnostics = container.searchService.getDiagnostics();
 
-  await interaction.reply({
-    content: [
+  await interaction.editReply(
+    [
       `Memory RSS MB: ${(memory.rss / 1024 / 1024).toFixed(1)}`,
       `Heap used MB: ${(memory.heapUsed / 1024 / 1024).toFixed(1)}`,
       `Active channels: ${contextStats.activeChannels}`,
@@ -76,11 +94,11 @@ export async function handleDebugCommand(interaction: ChatInputCommandInteractio
       `Channel limiter keys: ${limiterStats.channel.keys}`,
       `Mention limiter keys: ${limiterStats.mentionDaily.keys}`,
       `Provider: ${diagnostics.provider}`,
-      `Provider capabilities: ${JSON.stringify(diagnostics.capabilities)}`,
-      `Effective search: ${JSON.stringify(diagnostics.effectiveSearch)}`,
-      `Last annotations count: ${diagnostics.lastAnnotationsCount}`,
-      `Last downgrade reason: ${diagnostics.lastDowngradeReason ?? 'none'}`,
+      `AI diagnostics count: ${container.aiService.getDiagnosticsHistory().length}`,
+      `Web search status: ${diagnostics.effectiveSearch.status}`,
+      `Last AI reason: ${diagnostics.lastDowngradeReason ?? 'none'}`,
+      `App search mode: ${container.searchService.getEffectiveMode()}`,
+      `App search diagnostics: ${JSON.stringify(searchDiagnostics)}`,
     ].join('\n'),
-    ephemeral: true,
-  });
+  );
 }

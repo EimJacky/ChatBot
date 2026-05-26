@@ -15,6 +15,18 @@ container.logger.info(
     aiFallbackModel: container.env.aiFallbackModel ?? 'none',
     aiProvider: container.aiProvider.name,
     webSearch: container.aiService.getLastDiagnostics().effectiveSearch,
+    search: {
+      appSearchEnabled: container.env.appSearch.enabled,
+      mimoNativeSearchEnabled: container.env.aiWebSearch.enabled,
+      effectiveSearchMode: container.searchService.getEffectiveMode(),
+      provider: container.env.appSearch.provider,
+      resultLimit: container.env.appSearch.resultLimit,
+      cacheTtlMs: container.env.appSearch.cacheTtlMs,
+      dailyLimit: container.env.appSearch.dailyLimit,
+      dailyWarningRatio: container.env.appSearch.dailyWarningRatio,
+      llmIntentEnabled: container.env.appSearch.llmIntentEnabled,
+      progressNotice: container.env.appSearch.progressNotice,
+    },
   },
   'runtime AI configuration',
 );

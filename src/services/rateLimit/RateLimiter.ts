@@ -1,3 +1,4 @@
+import { LRUCache } from 'lru-cache';
 import { AppError } from '../../utils/errors.js';
 
 interface Bucket {
@@ -8,12 +9,19 @@ interface Bucket {
 export interface RateLimiterRule {
   max: number;
   windowMs: number;
+  maxKeys?: number;
 }
 
 export class FixedWindowRateLimiter {
-  private readonly buckets = new Map<string, Bucket>();
+  private readonly buckets: LRUCache<string, Bucket>;
 
-  constructor(private readonly rule: RateLimiterRule) {}
+  constructor(private readonly rule: RateLimiterRule) {
+    this.buckets = new LRUCache<string, Bucket>({
+      max: rule.maxKeys ?? 10_000,
+      ttl: rule.windowMs * 2,
+      ttlAutopurge: true,
+    });
+  }
 
   check(key: string, label = 'requests'): void {
     const now = Date.now();
@@ -36,6 +44,7 @@ export class FixedWindowRateLimiter {
   }
 
   getStats() {
+    this.buckets.purgeStale();
     return {
       keys: this.buckets.size,
       max: this.rule.max,
@@ -45,10 +54,16 @@ export class FixedWindowRateLimiter {
 }
 
 export class DailyCounterLimiter {
-  private readonly buckets = new Map<string, Bucket>();
   private readonly windowMs = 24 * 60 * 60 * 1_000;
+  private readonly buckets: LRUCache<string, Bucket>;
 
-  constructor(private readonly max: number) {}
+  constructor(private readonly max: number) {
+    this.buckets = new LRUCache<string, Bucket>({
+      max: 50_000,
+      ttl: this.windowMs,
+      ttlAutopurge: true,
+    });
+  }
 
   check(key: string): void {
     const now = Date.now();
@@ -67,11 +82,16 @@ export class DailyCounterLimiter {
   }
 
   getStats() {
+    this.buckets.purgeStale();
     return {
       keys: this.buckets.size,
       max: this.max,
       windowMs: this.windowMs,
     };
+  }
+
+  getCount(key: string): number {
+    return this.buckets.get(key)?.count ?? 0;
   }
 }
 
@@ -95,4 +115,3 @@ export class BotRateLimiters {
     };
   }
 }
-

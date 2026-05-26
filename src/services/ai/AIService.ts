@@ -7,7 +7,7 @@ import type {
 import type { Stream } from 'openai/streaming';
 import type { Env } from '../../config/env.js';
 import type { ChatMessage, StreamCallbacks } from '../../types/chat.js';
-import { AppError } from '../../utils/errors.js';
+import { AppError, createHttpError, isHttpError } from '../../utils/errors.js';
 import type { AppLogger } from '../../utils/logger.js';
 import type { Tokenizer } from '../context/Tokenizer.js';
 import type { PromptGuard } from './PromptGuard.js';
@@ -62,8 +62,11 @@ export interface SearchAnnotation {
 const DOWNGRADE_NOTICE =
   '*Search is temporarily unavailable, so I answered using local model knowledge.*';
 
-interface ExtendedChatCompletionsClient {
-  create(params: ExtendedChatCompletionParamsNonStreaming): Promise<ChatCompletion>;
+export interface ExtendedChatCompletionsClient {
+  create(
+    params: ExtendedChatCompletionParamsNonStreaming,
+    options?: { signal?: AbortSignal },
+  ): Promise<ChatCompletion>;
   create(
     params: ExtendedChatCompletionParamsStreaming,
     options?: { signal?: AbortSignal },
@@ -76,6 +79,7 @@ export class AIService {
   // Last-completed request wins. This is intentionally diagnostic state for operations,
   // not precise monitoring; the object is replaced atomically so fields stay self-consistent.
   private lastDiagnostics: AIProviderDiagnostics;
+  private readonly diagnosticsHistory: AIProviderDiagnostics[] = [];
 
   constructor(
     private readonly env: Env,
@@ -124,11 +128,11 @@ export class AIService {
     const result = await this.tryModels(input.traceId, messages, callbacks);
     const content = this.postProcessContent(result);
 
-    this.lastDiagnostics = this.createDiagnostics(result.model, result.effectiveSearch, {
+    this.recordDiagnostics(this.createDiagnostics(result.model, result.effectiveSearch, {
       lastWebSearchUsage: result.webSearchUsage,
       lastAnnotationsCount: result.annotations.length,
       ...(result.downgradeReason ? { lastDowngradeReason: result.downgradeReason } : {}),
-    });
+    }));
 
     this.logger.info(
       {
@@ -156,6 +160,14 @@ export class AIService {
 
   getLastDiagnostics(): AIProviderDiagnostics {
     return structuredClone(this.lastDiagnostics);
+  }
+
+  getDiagnosticsHistory(): AIProviderDiagnostics[] {
+    return structuredClone(this.diagnosticsHistory);
+  }
+
+  getChatCompletionsClient(): ExtendedChatCompletionsClient {
+    return this.chatCompletions;
   }
 
   private toOpenAIMessages(input: AICompletionInput): ChatCompletionMessageParam[] {
@@ -212,16 +224,18 @@ export class AIService {
         }
 
         return await this.completeOnce(model, messages, disableWebSearchReason);
-      } catch (error: any) {
+      } catch (error) {
         if (!disableWebSearchReason && this.canDowngradeSearch(error)) {
           const downgradeReason = describeSearchDowngrade(error);
+          const status = isHttpError(error) ? error.status : undefined;
+          const message = error instanceof Error ? error.message : undefined;
           this.logger.warn(
             {
               traceId,
               model,
               provider: this.provider.name,
-              status: error?.status,
-              message: error?.message,
+              status,
+              message,
             },
             'web search failed, retrying without search',
           );
@@ -235,8 +249,9 @@ export class AIService {
         }
 
         lastError = error;
-        const status = error?.status;
-        const retryable = status === 429 || status >= 500 || error?.code === 'ETIMEDOUT';
+        const status = isHttpError(error) ? error.status : undefined;
+        const code = getErrorCode(error);
+        const retryable = status === 429 || (status !== undefined && status >= 500) || code === 'ETIMEDOUT';
 
         if (!retryable || attempt === maxAttempts) {
           throw error;
@@ -304,8 +319,8 @@ export class AIService {
         content += token;
         await callbacks.onToken?.(token);
       }
-    } catch (error: any) {
-      if (error?.name === 'AbortError') {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
         throw new AppError('AI stream timed out.', 'AI_TIMEOUT', true, error);
       }
 
@@ -412,26 +427,28 @@ export class AIService {
   }
 
   private normalizeAIError(error: unknown): AppError {
-    const maybe = error as { status?: number; code?: string; message?: string };
+    const status = isHttpError(error) ? error.status : undefined;
+    const code = getErrorCode(error);
+    const message = error instanceof Error ? error.message : undefined;
 
-    if (maybe.status === 401 || maybe.status === 403) {
+    if (status === 401 || status === 403) {
       return new AppError('AI authentication failed.', 'AI_AUTH_ERROR', true, error);
     }
 
-    if (maybe.status === 404 || maybe.status === 400) {
+    if (status === 404 || status === 400) {
       return new AppError('AI model request failed.', 'AI_MODEL_ERROR', true, error);
     }
 
-    if (maybe.code === 'AI_TIMEOUT') {
+    if (code === 'AI_TIMEOUT') {
       return error as AppError;
     }
 
-    return new AppError(maybe.message ?? 'AI request failed.', 'AI_REQUEST_FAILED', true, error);
+    return new AppError(message ?? 'AI request failed.', 'AI_REQUEST_FAILED', true, error);
   }
 
   private canDowngradeSearch(error: unknown): boolean {
-    const maybe = error as { status?: number };
-    return this.env.aiWebSearch.enabled && (maybe.status === 400 || maybe.status === 403);
+    const status = isHttpError(error) ? error.status : undefined;
+    return this.env.aiWebSearch.enabled && (status === 400 || status === 403);
   }
 
   private postProcessContent(result: ProviderCompletionResult): string {
@@ -461,6 +478,14 @@ export class AIService {
       lastAnnotationsCount: 0,
       ...extra,
     };
+  }
+
+  private recordDiagnostics(diagnostics: AIProviderDiagnostics): void {
+    this.lastDiagnostics = diagnostics;
+    this.diagnosticsHistory.push(diagnostics);
+    if (this.diagnosticsHistory.length > 20) {
+      this.diagnosticsHistory.shift();
+    }
   }
 }
 
@@ -518,20 +543,23 @@ function getChatCompletionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/$/, '')}/chat/completions`;
 }
 
-function createHttpStatusError(status: number, body: string): Error & { status: number } {
+function createHttpStatusError(status: number, body: string) {
   const message = body.length > 500 ? `${body.slice(0, 500)}...` : body;
-  const error = new Error(message || `HTTP ${status}`) as Error & { status: number };
-  error.status = status;
-  return error;
+  return createHttpError(message || `HTTP ${status}`, status);
 }
 
 function describeSearchDowngrade(error: unknown): string {
-  const maybe = error as { status?: number; message?: string };
-  const message = typeof maybe.message === 'string' && maybe.message.trim()
-    ? maybe.message.replace(/\s+/g, ' ').slice(0, 240)
+  const status = isHttpError(error) ? error.status : undefined;
+  const errorMessage = error instanceof Error ? error.message : '';
+  const message = errorMessage.trim()
+    ? errorMessage.replace(/\s+/g, ' ').slice(0, 240)
     : 'search request failed';
 
-  return maybe.status ? `search request failed (${maybe.status}): ${message}` : message;
+  return status ? `search request failed (${status}): ${message}` : message;
+}
+
+function getErrorCode(error: unknown): unknown {
+  return error instanceof Error && 'code' in error ? error.code : undefined;
 }
 
 class SearchDowngradeFailure extends Error {

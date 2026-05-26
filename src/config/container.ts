@@ -7,6 +7,10 @@ import { resolveProvider } from '../services/ai/providers/resolveProvider.js';
 import { ContextManager } from '../services/context/ContextManager.js';
 import { Tokenizer } from '../services/context/Tokenizer.js';
 import { StreamingMessageHandler } from '../services/discord/StreamingMessageHandler.js';
+import { PromptAugmentor } from '../services/search/PromptAugmentor.js';
+import { SearchService } from '../services/search/SearchService.js';
+import type { SearchProvider } from '../services/search/SearchProvider.js';
+import { TavilySearchProvider } from '../services/search/TavilySearchProvider.js';
 import {
   BotRateLimiters,
   DailyCounterLimiter,
@@ -27,7 +31,10 @@ export interface Container {
   promptGuard: PromptGuard;
   aiProvider: AIProvider;
   aiService: AIService;
-  streamingMessageHandler: StreamingMessageHandler;
+  searchProvider?: SearchProvider;
+  searchService: SearchService;
+  promptAugmentor: PromptAugmentor;
+  createStreamingMessageHandler: () => StreamingMessageHandler;
   chatUseCase: ChatUseCase;
   systemPrompt: string;
 }
@@ -69,7 +76,23 @@ export function createContainer(): Container {
   );
 
   const aiService = new AIService(env, logger, tokenizer, promptGuard, resolvedProvider.provider);
-  const streamingMessageHandler = StreamingMessageHandler.createDefault();
+  const searchProvider = env.appSearch.provider === 'tavily' && env.appSearch.apiKey
+    ? new TavilySearchProvider({ apiKey: env.appSearch.apiKey })
+    : undefined;
+  const promptAugmentor = new PromptAugmentor(tokenizer);
+  const searchService = new SearchService(
+    env,
+    logger,
+    searchProvider,
+    promptAugmentor,
+    new FixedWindowRateLimiter({
+      max: env.appSearch.rateLimitMax,
+      windowMs: env.appSearch.rateLimitWindowMs,
+    }),
+    new DailyCounterLimiter(env.appSearch.dailyLimit),
+    aiService.getChatCompletionsClient(),
+  );
+  const createStreamingMessageHandler = () => StreamingMessageHandler.createDefault();
 
   // This hand-wired container is intentionally simple for v1.
   // If cross-service notifications grow, replace this wiring point with an event bus.
@@ -78,8 +101,10 @@ export function createContainer(): Container {
     logger,
     aiService,
     contextManager,
-    streamingMessageHandler,
+    createStreamingMessageHandler,
     rateLimiters,
+    searchService,
+    promptAugmentor,
     systemPrompt,
   );
 
@@ -93,7 +118,10 @@ export function createContainer(): Container {
     promptGuard,
     aiProvider: resolvedProvider.provider,
     aiService,
-    streamingMessageHandler,
+    ...(searchProvider ? { searchProvider } : {}),
+    searchService,
+    promptAugmentor,
+    createStreamingMessageHandler,
     chatUseCase,
     systemPrompt,
   };
@@ -113,7 +141,9 @@ export function validateContainer(container: Partial<Container>): asserts contai
     'promptGuard',
     'aiProvider',
     'aiService',
-    'streamingMessageHandler',
+    'searchService',
+    'promptAugmentor',
+    'createStreamingMessageHandler',
     'chatUseCase',
     'systemPrompt',
   ];

@@ -8,6 +8,7 @@ EchoMate is a TypeScript Discord AI group chat bot built with `discord.js` v14 a
 - Optional `@EchoMate` mention trigger
 - OpenAI-compatible API support via `AI_BASE_URL`
 - Provider strategy support for MiMo Web Search and plain OpenAI-compatible APIs
+- Optional app-side Tavily web search with prompt injection
 - Streaming AI replies with throttled Discord message edits
 - Per-user and per-channel rate limits
 - Daily mention limit
@@ -92,6 +93,34 @@ MiMo Web Search notes:
 - Search can add latency and provider-side cost.
 - Search failures are downgraded once to a no-search answer so Discord users still get a response.
 - Raw search results and annotations are not saved in conversation context.
+
+## App-Side Web Search
+
+If you do not want to pay for MiMo's native Web Search plugin, EchoMate can call Tavily itself and inject compact search snippets into the current prompt. This mode is mutually exclusive with MiMo native search.
+
+```env
+AI_WEB_SEARCH_ENABLED=false
+SEARCH_ENABLED=true
+SEARCH_PROVIDER=tavily
+SEARCH_API_KEY=your-tavily-key
+SEARCH_RESULT_LIMIT=2
+SEARCH_CACHE_TTL_MS=300000
+SEARCH_RATE_LIMIT_MAX=10
+SEARCH_RATE_LIMIT_WINDOW_MS=60000
+SEARCH_DAILY_LIMIT=100
+SEARCH_DAILY_WARNING_RATIO=0.8
+SEARCH_LLM_INTENT_ENABLED=false
+SEARCH_SHOW_SKIP_REASON=false
+SEARCH_PROGRESS_NOTICE=true
+```
+
+App-side search notes:
+
+- MiMo native search wins when both `AI_WEB_SEARCH_ENABLED=true` and `SEARCH_ENABLED=true`.
+- Search results are temporary context for one reply only; they are not saved to channel memory.
+- Cache hits do not consume per-user search limits or the global daily budget.
+- Tavily calls can add latency and consume provider quota; `/debug` shows usage diagnostics.
+- `SEARCH_LLM_INTENT_ENABLED=true` enables a low-token yes/no classifier for ambiguous prompts.
 
 ## Discord Configuration
 

@@ -21,5 +21,15 @@ describe('rate limiters', () => {
     limiter.check('guild');
     expect(() => limiter.check('guild')).toThrow(/Daily mention/);
   });
-});
 
+  it('autopurges fixed-window entries after the TTL', async () => {
+    const limiter = new FixedWindowRateLimiter({ max: 2, windowMs: 1 });
+
+    limiter.check('key');
+    expect(limiter.getStats().keys).toBe(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(limiter.getStats().keys).toBe(0);
+  });
+});

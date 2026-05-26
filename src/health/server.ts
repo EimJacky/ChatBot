@@ -13,17 +13,8 @@ export function startHealthServer(container: Container): Server | undefined {
       return;
     }
 
-    const stats = container.contextManager.getStats();
     response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(
-      JSON.stringify({
-        ok: true,
-        uptime: process.uptime(),
-        activeChannels: stats.activeChannels,
-        contextMessages: stats.messages,
-        estimatedTokens: stats.estimatedTokens,
-      }),
-    );
+    response.end(JSON.stringify({ ok: true }));
   });
 
   server.listen(container.env.healthCheckPort, '127.0.0.1', () => {
@@ -32,4 +23,3 @@ export function startHealthServer(container: Container): Server | undefined {
 
   return server;
 }
-

@@ -67,11 +67,25 @@ export class ContextManager {
 
   trim(messages: ChatMessage[]): ChatMessage[] {
     const budget = Math.max(0, this.options.contextWindowTokens - this.options.reserveOutputTokens);
-    let trimmed = [...messages];
+    let totalTokens = 0;
+    let cutIndex = messages.length;
 
-    while (trimmed.length > 0 && this.tokenizer.countMessages(trimmed) > budget) {
-      trimmed = trimmed.slice(1);
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (!message) {
+        continue;
+      }
+
+      const messageTokens = this.tokenizer.countText(`${message.role}: ${message.content}`) + 4;
+      if (totalTokens + messageTokens > budget) {
+        break;
+      }
+
+      totalTokens += messageTokens;
+      cutIndex = index;
     }
+
+    let trimmed = messages.slice(cutIndex);
 
     if (trimmed.length > this.options.maxContextMessages) {
       trimmed = trimmed.slice(-this.options.maxContextMessages);
