@@ -3,10 +3,12 @@ import { registerInteractionCreateEvent } from './events/interactionCreate.js';
 import { registerMessageCreateEvent } from './events/messageCreate.js';
 import { registerReadyEvent } from './events/ready.js';
 import { startHealthServer } from './health/server.js';
+import { validateStartup } from './config/startup.js';
 import { installGlobalErrorHandlers } from './utils/globalErrorHandlers.js';
 import { configureGlobalProxy } from './utils/proxy.js';
 
-const container = createContainer();
+const container = await createContainer();
+validateStartup(container);
 configureGlobalProxy(container.logger);
 container.logger.info(
   {
@@ -27,6 +29,10 @@ container.logger.info(
       llmIntentEnabled: container.env.appSearch.llmIntentEnabled,
       progressNotice: container.env.appSearch.progressNotice,
     },
+    storage: {
+      driver: container.env.storageDriver,
+      sqliteDbPath: container.env.storageDriver === 'sqlite' ? container.env.sqliteDbPath : undefined,
+    },
   },
   'runtime AI configuration',
 );
@@ -36,11 +42,24 @@ installGlobalErrorHandlers({
   logger: container.logger,
   client: container.client,
   ...(healthServer ? { healthServer } : {}),
+  shutdownTimeoutMs: container.env.gracefulShutdownTimeoutMs,
+  onShutdown: () => {
+    container.conversationCleaner.stop();
+    for (const store of new Set([
+      container.contextStore,
+      container.rateLimitStore,
+      container.usageStore,
+      container.preferenceStore,
+    ])) {
+      store.close?.();
+    }
+  },
 });
 
 registerReadyEvent(container.client, container);
 registerInteractionCreateEvent(container.client, container);
 registerMessageCreateEvent(container.client, container);
+container.conversationCleaner.start();
 
 setInterval(() => {
   const memory = process.memoryUsage();

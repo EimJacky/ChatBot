@@ -1,5 +1,6 @@
-import { LRUCache } from 'lru-cache';
 import type { ChatMessage } from '../../types/chat.js';
+import { MemoryContextStore } from '../storage/MemoryStores.js';
+import type { ContextStore } from '../storage/interfaces.js';
 import type { Tokenizer } from './Tokenizer.js';
 
 export interface ContextManagerOptions {
@@ -19,33 +20,29 @@ export interface ContextStats {
 }
 
 export class ContextManager {
-  private readonly cache: LRUCache<string, ChatMessage[]>;
+  private readonly store: ContextStore;
 
   constructor(
     private readonly tokenizer: Tokenizer,
     private readonly options: ContextManagerOptions,
+    store?: ContextStore,
   ) {
-    this.cache = new LRUCache<string, ChatMessage[]>({
-      max: 1_000,
-      ttl: options.contextTtlHours * 60 * 60 * 1_000,
-      ttlAutopurge: true,
-      updateAgeOnGet: true,
-    });
+    this.store = store ?? new MemoryContextStore();
   }
 
-  get(channelId: string): ChatMessage[] {
-    return [...(this.cache.get(channelId) ?? [])];
+  get(conversationKey: string): ChatMessage[] {
+    return this.store.getConversation(conversationKey);
   }
 
-  add(channelId: string, message: ChatMessage): ChatMessage[] {
-    const next = [...this.get(channelId), message];
+  add(conversationKey: string, message: ChatMessage): ChatMessage[] {
+    const next = [...this.get(conversationKey), message];
     const trimmed = this.trim(next);
-    this.cache.set(channelId, trimmed);
+    this.store.setConversation(conversationKey, trimmed, this.expiresAt());
     return trimmed;
   }
 
-  reset(channelId: string): void {
-    this.cache.delete(channelId);
+  reset(conversationKey: string): void {
+    this.store.deleteConversation(conversationKey);
   }
 
   compress(messages: ChatMessage[], keepLast = this.options.maxContextMessages): ChatMessage[] {
@@ -53,10 +50,10 @@ export class ContextManager {
   }
 
   getStats(channelId?: string): ContextStats {
-    const messages = channelId ? this.get(channelId) : Array.from(this.cache.values()).flat();
+    const messages = channelId ? this.get(channelId) : [];
 
     return {
-      activeChannels: this.cache.size,
+      activeChannels: this.store.countConversations(),
       ...(channelId ? { channelId } : {}),
       messages: messages.length,
       estimatedTokens: this.tokenizer.countMessages(messages),
@@ -92,5 +89,13 @@ export class ContextManager {
     }
 
     return trimmed;
+  }
+
+  cleanupExpired(now = Date.now()): number {
+    return this.store.cleanupExpired(now);
+  }
+
+  private expiresAt(): number {
+    return Date.now() + this.options.contextTtlHours * 60 * 60 * 1_000;
   }
 }

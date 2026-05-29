@@ -11,6 +11,22 @@ import { PromptAugmentor } from '../services/search/PromptAugmentor.js';
 import { SearchService } from '../services/search/SearchService.js';
 import type { SearchProvider } from '../services/search/SearchProvider.js';
 import { TavilySearchProvider } from '../services/search/TavilySearchProvider.js';
+import { ConversationCleaner } from '../services/maintenance/ConversationCleaner.js';
+import { MetricsRecorder } from '../services/metrics/MetricsRecorder.js';
+import {
+  MemoryContextStore,
+  MemoryPreferenceStore,
+  MemoryRateLimitStore,
+  MemoryUsageStore,
+} from '../services/storage/MemoryStores.js';
+import { MemoryStorageMonitor, SqliteStores } from '../services/storage/SqliteStores.js';
+import type {
+  ContextStore,
+  PreferenceStore,
+  RateLimitStore,
+  StorageMonitor,
+  UsageStore,
+} from '../services/storage/interfaces.js';
 import {
   BotRateLimiters,
   DailyCounterLimiter,
@@ -27,6 +43,11 @@ export interface Container {
   client: Client;
   tokenizer: Tokenizer;
   contextManager: ContextManager;
+  contextStore: ContextStore;
+  rateLimitStore: RateLimitStore;
+  usageStore: UsageStore;
+  preferenceStore: PreferenceStore;
+  storageMonitor: StorageMonitor;
   rateLimiters: BotRateLimiters;
   promptGuard: PromptGuard;
   aiProvider: AIProvider;
@@ -36,10 +57,12 @@ export interface Container {
   promptAugmentor: PromptAugmentor;
   createStreamingMessageHandler: () => StreamingMessageHandler;
   chatUseCase: ChatUseCase;
+  metrics: MetricsRecorder;
+  conversationCleaner: ConversationCleaner;
   systemPrompt: string;
 }
 
-export function createContainer(): Container {
+export async function createContainer(): Promise<Container> {
   const env = loadEnv();
   const logger = createLogger(env);
   const tokenizer = new Tokenizer();
@@ -56,23 +79,36 @@ export function createContainer(): Container {
     ],
   });
 
+  const stores = env.storageDriver === 'sqlite'
+    ? await SqliteStores.open({
+        dbPath: env.sqliteDbPath,
+        maxDbSizeMb: env.sqliteMaxDbSizeMb,
+        logger,
+      })
+    : undefined;
+  const contextStore = stores ?? new MemoryContextStore();
+  const rateLimitStore = stores ?? new MemoryRateLimitStore();
+  const usageStore = stores ?? new MemoryUsageStore();
+  const preferenceStore = stores ?? new MemoryPreferenceStore();
+  const storageMonitor = stores ?? new MemoryStorageMonitor();
+
   const contextManager = new ContextManager(tokenizer, {
     maxContextMessages: env.maxContextMessages,
     contextWindowTokens: env.aiContextWindowTokens,
     contextTtlHours: env.contextTtlHours,
     reserveOutputTokens: env.aiMaxTokens,
-  });
+  }, contextStore);
 
   const rateLimiters = new BotRateLimiters(
     new FixedWindowRateLimiter({
       max: env.userRateLimitMax,
       windowMs: env.userRateLimitWindowMs,
-    }),
+    }, rateLimitStore, 'chat-user'),
     new FixedWindowRateLimiter({
       max: env.channelRateLimitMax,
       windowMs: env.channelRateLimitWindowMs,
-    }),
-    new DailyCounterLimiter(env.mentionDailyLimit),
+    }, rateLimitStore, 'chat-channel'),
+    new DailyCounterLimiter(env.mentionDailyLimit, rateLimitStore, 'mention-daily'),
   );
 
   const aiService = new AIService(env, logger, tokenizer, promptGuard, resolvedProvider.provider);
@@ -88,11 +124,12 @@ export function createContainer(): Container {
     new FixedWindowRateLimiter({
       max: env.appSearch.rateLimitMax,
       windowMs: env.appSearch.rateLimitWindowMs,
-    }),
-    new DailyCounterLimiter(env.appSearch.dailyLimit),
+    }, rateLimitStore, 'search-user'),
+    new DailyCounterLimiter(env.appSearch.dailyLimit, rateLimitStore, 'search-daily'),
     aiService.getChatCompletionsClient(),
   );
   const createStreamingMessageHandler = () => StreamingMessageHandler.createDefault();
+  const metrics = new MetricsRecorder();
 
   // This hand-wired container is intentionally simple for v1.
   // If cross-service notifications grow, replace this wiring point with an event bus.
@@ -106,6 +143,18 @@ export function createContainer(): Container {
     searchService,
     promptAugmentor,
     systemPrompt,
+    usageStore,
+    tokenizer,
+    metrics,
+    preferenceStore,
+  );
+  const conversationCleaner = new ConversationCleaner(
+    env,
+    logger,
+    contextManager,
+    rateLimitStore,
+    usageStore,
+    storageMonitor,
   );
 
   const container: Container = {
@@ -114,6 +163,11 @@ export function createContainer(): Container {
     client,
     tokenizer,
     contextManager,
+    contextStore,
+    rateLimitStore,
+    usageStore,
+    preferenceStore,
+    storageMonitor,
     rateLimiters,
     promptGuard,
     aiProvider: resolvedProvider.provider,
@@ -123,6 +177,8 @@ export function createContainer(): Container {
     promptAugmentor,
     createStreamingMessageHandler,
     chatUseCase,
+    metrics,
+    conversationCleaner,
     systemPrompt,
   };
 
@@ -137,6 +193,11 @@ export function validateContainer(container: Partial<Container>): asserts contai
     'client',
     'tokenizer',
     'contextManager',
+    'contextStore',
+    'rateLimitStore',
+    'usageStore',
+    'preferenceStore',
+    'storageMonitor',
     'rateLimiters',
     'promptGuard',
     'aiProvider',
@@ -145,6 +206,8 @@ export function validateContainer(container: Partial<Container>): asserts contai
     'promptAugmentor',
     'createStreamingMessageHandler',
     'chatUseCase',
+    'metrics',
+    'conversationCleaner',
     'systemPrompt',
   ];
 

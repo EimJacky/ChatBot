@@ -4,7 +4,7 @@ EchoMate is a TypeScript Discord AI group chat bot built with `discord.js` v14 a
 
 ## Features
 
-- Slash commands: `/chat`, `/reset`, `/stats`, `/ping`, `/models`, `/debug`
+- Slash commands: `/chat`, `/reset`, `/stats`, `/usage`, `/persona`, `/lang`, `/ping`, `/models`, `/debug`
 - Optional `@EchoMate` mention trigger
 - OpenAI-compatible API support via `AI_BASE_URL`
 - Provider strategy support for MiMo Web Search and plain OpenAI-compatible APIs
@@ -12,11 +12,12 @@ EchoMate is a TypeScript Discord AI group chat bot built with `discord.js` v14 a
 - Streaming AI replies with throttled Discord message edits
 - Per-user and per-channel rate limits
 - Daily mention limit
-- Channel-scoped in-memory context with LRU + TTL cleanup
+- Channel/thread/DM-scoped context with TTL cleanup
 - Token estimation with `gpt-tokenizer`
 - Prompt Guard rules loaded from `config/prompt-guard-rules.json`
 - Owner-only `/debug` diagnostics
-- Optional local `/healthz` endpoint
+- Optional local `/livez`, `/readyz`, and `/healthz` endpoints
+- Optional SQLite-backed conversation, rate limit, and usage persistence
 - ESLint, Prettier, Vitest, Husky, lint-staged
 
 ## Requirements
@@ -122,6 +123,48 @@ App-side search notes:
 - Tavily calls can add latency and consume provider quota; `/debug` shows usage diagnostics.
 - `SEARCH_LLM_INTENT_ENABLED=true` enables a low-token yes/no classifier for ambiguous prompts.
 
+## Production Storage
+
+EchoMate defaults to in-memory storage for local development. For long-running Docker or VPS deployments, enable SQLite:
+
+```env
+STORAGE_DRIVER=sqlite
+SQLITE_DB_PATH=data/echomate.sqlite
+USAGE_RETENTION_DAYS=90
+SQLITE_MAX_DB_SIZE_MB=512
+HEALTH_CHECK_PORT=3000
+CHANNEL_ALLOWLIST=
+CHANNEL_BLOCKLIST=
+MESSAGE_REFERENCE_ENABLED=true
+FEEDBACK_REACTIONS_ENABLED=false
+```
+
+SQLite mode persists conversation context, rate-limit windows, and usage summaries across restarts. Usage records do not store user prompts or AI response text. Current in-memory conversations are not migrated when switching to SQLite.
+
+Conversation memory is scoped as follows:
+
+- Discord threads and forum posts: `thread:{threadId}`
+- Guild text channels: `channel:{channelId}`
+- DMs: `dm:{userId}`
+
+Back up SQLite while the bot is stopped, or copy the database from `data/`. A simple daily backup policy is to keep timestamped copies for 7 days.
+
+```powershell
+Copy-Item data/echomate.sqlite "data/backup/echomate-$(Get-Date -Format yyyyMMdd).sqlite"
+```
+
+`CHANNEL_ALLOWLIST` and `CHANNEL_BLOCKLIST` accept comma-separated Discord channel or thread IDs. The blocklist wins over the allowlist.
+
+When `MESSAGE_REFERENCE_ENABLED=true`, mentioning the bot while replying to a previous bot message includes that referenced bot message as context for the follow-up. `FEEDBACK_REACTIONS_ENABLED=true` makes successful bot replies add thumbs-up/down reactions for lightweight feedback; the bot needs permission to add reactions.
+
+## Health and Metrics
+
+When `HEALTH_CHECK_PORT` is enabled:
+
+- `/livez` returns process liveness.
+- `/readyz` checks Discord readiness, storage, memory, and DB size status.
+- `/metrics` exposes a Prometheus-style text snapshot for request, error, token, and latency counters.
+
 ## Discord Configuration
 
 In the Discord Developer Portal:
@@ -138,6 +181,17 @@ In the Discord Developer Portal:
    - `Use Slash Commands`
    - Optional: `Read Message History`
 7. Leave **Interactions Endpoint URL** empty for this Gateway-based bot.
+
+## User Preferences
+
+Users can tune replies without changing the global system prompt:
+
+```text
+/persona style:technical
+/lang language:简体中文
+```
+
+Preferences are stored per Discord user. In SQLite mode they persist across restarts; in memory mode they reset when the bot restarts.
 
 ## Register Commands
 
@@ -198,7 +252,9 @@ npm run doctor      # Diagnose Discord token/client configuration
 npm run lint        # Run ESLint
 npm run typecheck   # Run TypeScript checks
 npm test            # Run Vitest
+npm run test:coverage # Run Vitest with coverage thresholds
 npm run build       # Compile TypeScript
+npm run docker:build # Build the production Docker image
 ```
 
 ## Project Structure

@@ -7,7 +7,11 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     coverage: {
       reporter: ['text', 'json-summary'],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        statements: 80,
+      },
     },
   },
 });
-

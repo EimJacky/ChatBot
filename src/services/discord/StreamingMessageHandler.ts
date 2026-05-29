@@ -48,12 +48,17 @@ export class StreamingMessageHandler {
     }
   }
 
-  async finish(reply: EditableReply, finalText: string): Promise<void> {
+  async finish(reply: EditableReply, finalText: string, finalOptions?: InteractionEditReplyOptions): Promise<void> {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = undefined;
     }
     this.buffer = finalText;
+    if (finalOptions) {
+      this.lastFlushAt = Date.now();
+      await this.scheduleEdit(reply, finalOptions);
+      return;
+    }
     await this.flush(reply);
   }
 
@@ -67,7 +72,7 @@ export class StreamingMessageHandler {
     await this.scheduleEdit(reply, fitDiscordMessage(this.buffer || 'Thinking...'));
   }
 
-  private async scheduleEdit(reply: EditableReply, text: string): Promise<void> {
-    await this.limiter.schedule(() => reply.editReply(text));
+  private async scheduleEdit(reply: EditableReply, options: string | InteractionEditReplyOptions): Promise<void> {
+    await this.limiter.schedule(() => reply.editReply(options));
   }
 }

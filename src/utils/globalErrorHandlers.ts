@@ -6,36 +6,45 @@ export function installGlobalErrorHandlers(options: {
   logger: AppLogger;
   client?: Client;
   healthServer?: Server;
+  shutdownTimeoutMs?: number;
+  onShutdown?: () => Promise<void> | void;
 }) {
-  const shutdown = async (reason: string, error?: unknown) => {
-    options.logger.fatal({ err: error, reason }, 'shutting down');
+  let shuttingDown = false;
 
-    void options.healthServer?.close();
-    void options.client?.destroy();
+  const shutdown = async (reason: string, exitCode: number, error?: unknown) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    const log = exitCode === 0 ? options.logger.info.bind(options.logger) : options.logger.fatal.bind(options.logger);
+    log({ err: error, reason }, 'shutting down');
 
-    process.exitCode = 1;
-    setTimeout(() => process.exit(1), 250).unref();
+    const timeout = setTimeout(() => process.exit(exitCode), options.shutdownTimeoutMs ?? 30_000);
+    timeout.unref();
+
+    try {
+      await options.onShutdown?.();
+      await new Promise<void>((resolve) => options.healthServer?.close(() => resolve()) ?? resolve());
+      void options.client?.destroy();
+    } finally {
+      clearTimeout(timeout);
+      process.exit(exitCode);
+    }
   };
 
   process.on('unhandledRejection', (reason) => {
-    void shutdown('unhandledRejection', reason);
+    void shutdown('unhandledRejection', 1, reason);
   });
 
   process.on('uncaughtException', (error) => {
-    void shutdown('uncaughtException', error);
+    void shutdown('uncaughtException', 1, error);
   });
 
   process.on('SIGINT', () => {
-    options.logger.info('received SIGINT');
-    void options.healthServer?.close();
-    void options.client?.destroy();
-    void process.exit(0);
+    void shutdown('SIGINT', 0);
   });
 
   process.on('SIGTERM', () => {
-    options.logger.info('received SIGTERM');
-    void options.healthServer?.close();
-    void options.client?.destroy();
-    void process.exit(0);
+    void shutdown('SIGTERM', 0);
   });
 }

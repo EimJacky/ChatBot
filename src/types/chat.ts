@@ -1,3 +1,5 @@
+import type { InteractionEditReplyOptions } from 'discord.js';
+
 export type ChatRole = 'system' | 'user' | 'assistant';
 
 export interface ChatMessage {
@@ -11,9 +13,12 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   traceId: string;
+  conversationKey?: string;
   channelId: string;
   userId: string;
   prompt: string;
+  guildId?: string;
+  threadId?: string;
   messageId?: string;
 }
 
@@ -21,6 +26,7 @@ export interface ChatResult {
   content: string;
   model: string;
   estimatedPromptTokens: number;
+  presentation?: InteractionEditReplyOptions;
 }
 
 export interface StreamCallbacks {

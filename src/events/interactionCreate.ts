@@ -4,11 +4,15 @@ import type { Container } from '../config/container.js';
 import {
   handleChatCommand,
   handleDebugCommand,
+  handleLangCommand,
   handleModelsCommand,
+  handlePersonaCommand,
   handlePingCommand,
   handleResetCommand,
   handleStatsCommand,
+  handleUsageCommand,
 } from '../commands/handlers.js';
+import { createTraceId, runWithTrace } from '../utils/trace.js';
 
 export function registerInteractionCreateEvent(client: Client, container: Container) {
   client.on(Events.InteractionCreate, (interaction: Interaction) => {
@@ -23,6 +27,12 @@ async function handleInteraction(interaction: Interaction, container: Container)
     return;
   }
 
+  await runWithTrace({
+    traceId: createTraceId(),
+    userId: interaction.user.id,
+    guildId: interaction.guildId ?? undefined,
+    channelId: interaction.channelId,
+  }, async () => {
   container.logger.info(
     {
       commandName: interaction.commandName,
@@ -43,6 +53,15 @@ async function handleInteraction(interaction: Interaction, container: Container)
     case 'stats':
       await handleStatsCommand(interaction, container);
       break;
+    case 'usage':
+      await handleUsageCommand(interaction, container);
+      break;
+    case 'persona':
+      await handlePersonaCommand(interaction, container);
+      break;
+    case 'lang':
+      await handleLangCommand(interaction, container);
+      break;
     case 'ping':
       await handlePingCommand(interaction);
       break;
@@ -55,6 +74,7 @@ async function handleInteraction(interaction: Interaction, container: Container)
     default:
       await interaction.reply({ content: 'Unknown command.', ephemeral: true });
   }
+  });
 }
 
 async function handleInteractionError(

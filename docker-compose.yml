@@ -1,0 +1,17 @@
+services:
+  echomate:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      STORAGE_DRIVER: sqlite
+      SQLITE_DB_PATH: /app/data/echomate.sqlite
+      HEALTH_CHECK_PORT: 3000
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M

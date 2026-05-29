@@ -56,6 +56,8 @@ export function userFacingError(error: unknown): string {
       return appError.message;
     case 'INPUT_TOO_LONG':
       return appError.message;
+    case 'CHANNEL_NOT_ALLOWED':
+      return appError.message;
     case 'AI_AUTH_ERROR':
       return 'AI service authentication failed. Please check the API key.';
     case 'AI_MODEL_ERROR':

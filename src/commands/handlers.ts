@@ -1,5 +1,6 @@
 import type { ChatInputCommandInteraction } from 'discord.js';
 import type { Container } from '../config/container.js';
+import { resolveConversationIdentity } from '../services/conversation/conversationKey.js';
 
 export async function handleChatCommand(interaction: ChatInputCommandInteraction, container: Container) {
   const prompt = interaction.options.getString('prompt', true);
@@ -9,21 +10,119 @@ export async function handleChatCommand(interaction: ChatInputCommandInteraction
 
 export async function handleResetCommand(interaction: ChatInputCommandInteraction, container: Container) {
   await interaction.deferReply({ ephemeral: true });
-  container.contextManager.reset(interaction.channelId);
-  await interaction.editReply('Context reset for this channel.');
+  const identity = resolveConversationIdentity({
+    channelId: interaction.channelId,
+    userId: interaction.user.id,
+    guildId: interaction.guildId,
+    channel: interaction.channel,
+  });
+  container.contextManager.reset(identity.conversationKey);
+  await interaction.editReply('Context reset for this conversation.');
 }
 
 export async function handleStatsCommand(interaction: ChatInputCommandInteraction, container: Container) {
   await interaction.deferReply({ ephemeral: true });
-  const stats = container.contextManager.getStats(interaction.channelId);
+  const identity = resolveConversationIdentity({
+    channelId: interaction.channelId,
+    userId: interaction.user.id,
+    guildId: interaction.guildId,
+    channel: interaction.channel,
+  });
+  const stats = container.contextManager.getStats(identity.conversationKey);
   await interaction.editReply(
     [
+      `Conversation: ${identity.conversationKey}`,
       `Messages: ${stats.messages}`,
       `Estimated tokens: ${stats.estimatedTokens}`,
       `Active channels: ${stats.activeChannels}`,
       `Context window: ${stats.contextWindowTokens}`,
     ].join('\n'),
   );
+}
+
+export async function handleUsageCommand(interaction: ChatInputCommandInteraction, container: Container) {
+  await interaction.deferReply({ ephemeral: true });
+  const now = Date.now();
+  const windows = [7, 30, 90];
+  const lines = [`Usage for <@${interaction.user.id}>`];
+
+  for (const days of windows) {
+    const summary = container.usageStore.summarizeUser(
+      interaction.user.id,
+      now - days * 24 * 60 * 60 * 1_000,
+    );
+    lines.push(
+      `${days}d: ${summary.requests} replies, ${summary.inputTokens} input tokens, ${summary.outputTokens} output tokens, ${summary.searchRequests} searches, avg ${summary.averageElapsedMs}ms`,
+    );
+  }
+
+  if (container.env.botOwnerIds.has(interaction.user.id)) {
+    const global = container.usageStore.summarizeGlobal(now - 30 * 24 * 60 * 60 * 1_000);
+    const top = container.usageStore.topUsers(now - 30 * 24 * 60 * 60 * 1_000, 5);
+    lines.push('');
+    lines.push(`Global 30d: ${global.requests} replies, ${global.inputTokens + global.outputTokens} tokens`);
+    lines.push(
+      `Top users: ${top.length > 0 ? top.map((user) => `${user.userId}:${user.requests}`).join(', ') : 'none'}`,
+    );
+  }
+
+  await interaction.editReply(lines.join('\n'));
+}
+
+export async function handlePersonaCommand(interaction: ChatInputCommandInteraction, container: Container) {
+  await interaction.deferReply({ ephemeral: true });
+  const style = interaction.options.getString('style', true);
+  const existing = container.preferenceStore.getUserPreferences(interaction.user.id);
+
+  if (style === 'clear') {
+    if (existing?.language) {
+      container.preferenceStore.setUserPreferences({
+        userId: interaction.user.id,
+        language: existing.language,
+        updatedAt: Date.now(),
+      });
+    } else {
+      container.preferenceStore.clearUserPreferences(interaction.user.id);
+    }
+    await interaction.editReply('Persona preference cleared.');
+    return;
+  }
+
+  container.preferenceStore.setUserPreferences({
+    userId: interaction.user.id,
+    ...(existing?.language ? { language: existing.language } : {}),
+    persona: style,
+    updatedAt: Date.now(),
+  });
+  await interaction.editReply(`Persona preference set to ${style}.`);
+}
+
+export async function handleLangCommand(interaction: ChatInputCommandInteraction, container: Container) {
+  await interaction.deferReply({ ephemeral: true });
+  const language = interaction.options.getString('language', true);
+  const existing = container.preferenceStore.getUserPreferences(interaction.user.id);
+
+  if (language === 'clear') {
+    if (existing?.persona) {
+      container.preferenceStore.setUserPreferences({
+        userId: interaction.user.id,
+        persona: existing.persona,
+        updatedAt: Date.now(),
+      });
+    } else {
+      container.preferenceStore.clearUserPreferences(interaction.user.id);
+    }
+    await interaction.editReply('Language preference cleared.');
+    return;
+  }
+
+  container.preferenceStore.setUserPreferences({
+    userId: interaction.user.id,
+    ...(existing?.persona ? { persona: existing.persona } : {}),
+    language,
+    updatedAt: Date.now(),
+  });
+  await interaction.editReply(`Language preference set to ${language}.`);
 }
 
 export async function handlePingCommand(interaction: ChatInputCommandInteraction) {
@@ -82,6 +181,8 @@ export async function handleDebugCommand(interaction: ChatInputCommandInteractio
   const limiterStats = container.rateLimiters.getStats();
   const diagnostics = container.aiService.getLastDiagnostics();
   const searchDiagnostics = container.searchService.getDiagnostics();
+  const metrics = container.metrics.getSnapshot();
+  const storageHealth = container.storageMonitor.check();
 
   await interaction.editReply(
     [
@@ -99,6 +200,8 @@ export async function handleDebugCommand(interaction: ChatInputCommandInteractio
       `Last AI reason: ${diagnostics.lastDowngradeReason ?? 'none'}`,
       `App search mode: ${container.searchService.getEffectiveMode()}`,
       `App search diagnostics: ${JSON.stringify(searchDiagnostics)}`,
+      `Storage health: ${JSON.stringify(storageHealth)}`,
+      `Metrics: ${JSON.stringify(metrics)}`,
     ].join('\n'),
   );
 }

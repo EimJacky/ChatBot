@@ -80,6 +80,20 @@ describe('loadEnv', () => {
     });
   });
 
+  it('loads channel allow and block lists', () => {
+    const env = loadEnv({
+      ...baseEnv,
+      CHANNEL_ALLOWLIST: 'channel-a, thread-b',
+      CHANNEL_BLOCKLIST: 'channel-z',
+    });
+
+    expect(env.channelAllowlist.has('channel-a')).toBe(true);
+    expect(env.channelAllowlist.has('thread-b')).toBe(true);
+    expect(env.channelBlocklist.has('channel-z')).toBe(true);
+    expect(env.messageReferenceEnabled).toBe(true);
+    expect(env.feedbackReactionsEnabled).toBe(false);
+  });
+
   it('rejects invalid app-side search ratios', () => {
     expect(() =>
       loadEnv({

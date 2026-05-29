@@ -40,6 +40,12 @@ const ratioFromString = (defaultValue: number) =>
     .transform((value) => (value === undefined || value === '' ? defaultValue : Number(value)))
     .pipe(z.number().min(0).max(1));
 
+const stringSetFromCsv = z
+  .string()
+  .optional()
+  .default('')
+  .transform((value) => new Set(value.split(',').map((item) => item.trim()).filter(Boolean)));
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DISCORD_TOKEN: z.string().min(1),
@@ -75,6 +81,19 @@ const envSchema = z.object({
   SEARCH_LLM_INTENT_ENABLED: booleanFromString(false),
   SEARCH_SHOW_SKIP_REASON: booleanFromString(false),
   SEARCH_PROGRESS_NOTICE: booleanFromString(true),
+  STORAGE_DRIVER: z.enum(['memory', 'sqlite']).default('memory'),
+  SQLITE_DB_PATH: z.string().default('data/echomate.sqlite'),
+  SQLITE_MAX_DB_SIZE_MB: positiveIntegerFromString(512),
+  USAGE_RETENTION_DAYS: positiveIntegerFromString(90),
+  USAGE_OWNER_DETAIL_ENABLED: booleanFromString(false),
+  CONVERSATION_CLEANUP_ENABLED: booleanFromString(true),
+  CONVERSATION_CLEANUP_INTERVAL_MS: positiveIntegerFromString(3_600_000),
+  MAX_CONVERSATIONS_PER_USER: positiveIntegerFromString(1_000),
+  GRACEFUL_SHUTDOWN_TIMEOUT_MS: positiveIntegerFromString(30_000),
+  CHANNEL_ALLOWLIST: stringSetFromCsv,
+  CHANNEL_BLOCKLIST: stringSetFromCsv,
+  MESSAGE_REFERENCE_ENABLED: booleanFromString(true),
+  FEEDBACK_REACTIONS_ENABLED: booleanFromString(false),
   ENABLE_MENTION_TRIGGER: booleanFromString(true),
   MENTION_DAILY_LIMIT: numberFromString(100),
   MAX_CONTEXT_MESSAGES: numberFromString(30),
@@ -135,6 +154,19 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env) {
       showSkipReason: parsed.SEARCH_SHOW_SKIP_REASON,
       progressNotice: parsed.SEARCH_PROGRESS_NOTICE,
     },
+    storageDriver: parsed.STORAGE_DRIVER,
+    sqliteDbPath: parsed.SQLITE_DB_PATH,
+    sqliteMaxDbSizeMb: parsed.SQLITE_MAX_DB_SIZE_MB,
+    usageRetentionDays: parsed.USAGE_RETENTION_DAYS,
+    usageOwnerDetailEnabled: parsed.USAGE_OWNER_DETAIL_ENABLED,
+    conversationCleanupEnabled: parsed.CONVERSATION_CLEANUP_ENABLED,
+    conversationCleanupIntervalMs: parsed.CONVERSATION_CLEANUP_INTERVAL_MS,
+    maxConversationsPerUser: parsed.MAX_CONVERSATIONS_PER_USER,
+    gracefulShutdownTimeoutMs: parsed.GRACEFUL_SHUTDOWN_TIMEOUT_MS,
+    channelAllowlist: parsed.CHANNEL_ALLOWLIST,
+    channelBlocklist: parsed.CHANNEL_BLOCKLIST,
+    messageReferenceEnabled: parsed.MESSAGE_REFERENCE_ENABLED,
+    feedbackReactionsEnabled: parsed.FEEDBACK_REACTIONS_ENABLED,
     enableMentionTrigger: parsed.ENABLE_MENTION_TRIGGER,
     mentionDailyLimit: parsed.MENTION_DAILY_LIMIT,
     maxContextMessages: parsed.MAX_CONTEXT_MESSAGES,

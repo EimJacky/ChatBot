@@ -1,5 +1,6 @@
 import pino from 'pino';
 import type { Env } from '../config/env.js';
+import { getTraceContext } from './trace.js';
 
 export function createLogger(env: Pick<Env, 'nodeEnv' | 'logLevel' | 'logDestination'>) {
   const baseOptions: pino.LoggerOptions = {
@@ -7,6 +8,9 @@ export function createLogger(env: Pick<Env, 'nodeEnv' | 'logLevel' | 'logDestina
     redact: {
       paths: ['DISCORD_TOKEN', 'AI_API_KEY', '*.apiKey', '*.token', 'req.headers.authorization'],
       censor: '[redacted]',
+    },
+    mixin() {
+      return getTraceContext() ?? {};
     },
   };
 
@@ -32,4 +36,3 @@ export function createLogger(env: Pick<Env, 'nodeEnv' | 'logLevel' | 'logDestina
 }
 
 export type AppLogger = ReturnType<typeof createLogger>;
-
