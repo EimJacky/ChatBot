@@ -2,6 +2,11 @@ import { Events } from 'discord.js';
 import type { Client, Interaction } from 'discord.js';
 import type { Container } from '../config/container.js';
 import {
+  buildErrorPresentation,
+  isPaginationCustomId,
+  resolvePaginatedPresentation,
+} from '../services/discord/ResponsePresentation.js';
+import {
   handleChatCommand,
   handleDebugCommand,
   handleLangCommand,
@@ -23,6 +28,19 @@ export function registerInteractionCreateEvent(client: Client, container: Contai
 }
 
 async function handleInteraction(interaction: Interaction, container: Container) {
+  if (interaction.isButton() && isPaginationCustomId(interaction.customId)) {
+    const presentation = resolvePaginatedPresentation(interaction.customId);
+    if (!presentation) {
+      await interaction.reply({
+        ...buildErrorPresentation('That page session expired. Please run the request again.', 'PAGINATION_EXPIRED'),
+        ephemeral: true,
+      });
+      return;
+    }
+    await interaction.update(presentation);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -92,9 +110,9 @@ async function handleInteractionError(
 
   try {
     if (interaction.deferred || interaction.replied) {
-      await interaction.editReply(content);
+      await interaction.editReply(buildErrorPresentation(content, 'INTERACTION_FAILED'));
     } else {
-      await interaction.reply({ content, ephemeral: true });
+      await interaction.reply({ ...buildErrorPresentation(content, 'INTERACTION_FAILED'), ephemeral: true });
     }
   } catch (replyError) {
     container.logger.error({ err: replyError }, 'failed to send interaction error response');

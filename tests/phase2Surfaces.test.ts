@@ -113,15 +113,27 @@ describe('Phase 2 command and health surfaces', () => {
     container.contextManager.add('channel:channel-id', { role: 'user', content: 'hello', timestamp: Date.now() });
     const statsInteraction = createInteraction('owner-id');
     await handleStatsCommand(statsInteraction, container);
-    expect(String(statsInteraction.editReply.mock.calls[0]?.[0])).toContain('Conversation: channel:channel-id');
+    expect(statsInteraction.editReply.mock.calls[0]?.[0]).toMatchObject({
+      content: 'Stats for channel:channel-id',
+      embeds: [expect.objectContaining({ title: 'Conversation Stats' })],
+    });
 
     const usageInteraction = createInteraction('owner-id');
     await handleUsageCommand(usageInteraction, container);
-    expect(String(usageInteraction.editReply.mock.calls[0]?.[0])).toContain('7d: 1 replies');
+    expect(usageInteraction.editReply.mock.calls[0]?.[0]).toMatchObject({
+      content: 'Usage for <@owner-id>',
+      embeds: [
+        expect.objectContaining({ title: 'Usage Dashboard' }),
+        expect.objectContaining({ title: 'Owner 30d Overview' }),
+      ],
+    });
 
     const debugInteraction = createInteraction('owner-id');
     await handleDebugCommand(debugInteraction, container);
-    expect(String(debugInteraction.editReply.mock.calls[0]?.[0])).toContain('Storage health');
+    expect(debugInteraction.editReply.mock.calls[0]?.[0]).toMatchObject({
+      content: 'Runtime debug dashboard',
+      embeds: expect.arrayContaining([expect.objectContaining({ title: 'Storage and Metrics' })]),
+    });
 
     const blockedDebug = createInteraction('other-id');
     await handleDebugCommand(blockedDebug, container);
@@ -138,7 +150,10 @@ describe('Phase 2 command and health surfaces', () => {
       supportsAnnotations: false,
     });
     await handleModelsCommand(models, container);
-    expect(String(models.editReply.mock.calls[0]?.[0])).toContain('Provider');
+    expect(models.editReply.mock.calls[0]?.[0]).toMatchObject({
+      content: 'Model configuration',
+      embeds: expect.arrayContaining([expect.objectContaining({ title: 'Model Configuration' })]),
+    });
 
     const persona = createInteraction('owner-id', { options: { getString: vi.fn().mockReturnValue('technical') } });
     await handlePersonaCommand(persona, container);

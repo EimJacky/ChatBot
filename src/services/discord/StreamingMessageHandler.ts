@@ -62,9 +62,15 @@ export class StreamingMessageHandler {
     await this.flush(reply);
   }
 
-  async edit(reply: EditableReply, text: string): Promise<void> {
-    this.buffer = text;
-    await this.flush(reply);
+  async edit(reply: EditableReply, value: string | InteractionEditReplyOptions): Promise<void> {
+    if (typeof value === 'string') {
+      this.buffer = value;
+      await this.flush(reply);
+      return;
+    }
+
+    this.lastFlushAt = Date.now();
+    await this.scheduleEdit(reply, value);
   }
 
   private async flush(reply: EditableReply): Promise<void> {

@@ -1,6 +1,12 @@
 import type { ChatInputCommandInteraction } from 'discord.js';
 import type { Container } from '../config/container.js';
 import { resolveConversationIdentity } from '../services/conversation/conversationKey.js';
+import {
+  buildDebugDashboard,
+  buildModelsDashboard,
+  buildStatsDashboard,
+  buildUsageDashboard,
+} from '../services/discord/ResponsePresentation.js';
 
 export async function handleChatCommand(interaction: ChatInputCommandInteraction, container: Container) {
   const prompt = interaction.options.getString('prompt', true);
@@ -29,44 +35,45 @@ export async function handleStatsCommand(interaction: ChatInputCommandInteractio
     channel: interaction.channel,
   });
   const stats = container.contextManager.getStats(identity.conversationKey);
-  await interaction.editReply(
-    [
-      `Conversation: ${identity.conversationKey}`,
-      `Messages: ${stats.messages}`,
-      `Estimated tokens: ${stats.estimatedTokens}`,
-      `Active channels: ${stats.activeChannels}`,
-      `Context window: ${stats.contextWindowTokens}`,
-    ].join('\n'),
-  );
+  await interaction.editReply(buildStatsDashboard({
+    conversationKey: identity.conversationKey,
+    messages: stats.messages,
+    estimatedTokens: stats.estimatedTokens,
+    activeChannels: stats.activeChannels,
+    contextWindowTokens: stats.contextWindowTokens,
+  }));
 }
 
 export async function handleUsageCommand(interaction: ChatInputCommandInteraction, container: Container) {
   await interaction.deferReply({ ephemeral: true });
   const now = Date.now();
   const windows = [7, 30, 90];
-  const lines = [`Usage for <@${interaction.user.id}>`];
+  const summaries = [];
 
   for (const days of windows) {
     const summary = container.usageStore.summarizeUser(
       interaction.user.id,
       now - days * 24 * 60 * 60 * 1_000,
     );
-    lines.push(
-      `${days}d: ${summary.requests} replies, ${summary.inputTokens} input tokens, ${summary.outputTokens} output tokens, ${summary.searchRequests} searches, avg ${summary.averageElapsedMs}ms`,
-    );
+    summaries.push({ days, summary });
   }
 
+  let owner: Parameters<typeof buildUsageDashboard>[0]['owner'] | undefined;
   if (container.env.botOwnerIds.has(interaction.user.id)) {
     const global = container.usageStore.summarizeGlobal(now - 30 * 24 * 60 * 60 * 1_000);
     const top = container.usageStore.topUsers(now - 30 * 24 * 60 * 60 * 1_000, 5);
-    lines.push('');
-    lines.push(`Global 30d: ${global.requests} replies, ${global.inputTokens + global.outputTokens} tokens`);
-    lines.push(
-      `Top users: ${top.length > 0 ? top.map((user) => `${user.userId}:${user.requests}`).join(', ') : 'none'}`,
-    );
+    owner = {
+      global30d: global,
+      topUsers: top,
+      detailEnabled: container.env.usageOwnerDetailEnabled,
+    };
   }
 
-  await interaction.editReply(lines.join('\n'));
+  await interaction.editReply(buildUsageDashboard({
+    userId: interaction.user.id,
+    windows: summaries,
+    ...(owner ? { owner } : {}),
+  }));
 }
 
 export async function handlePersonaCommand(interaction: ChatInputCommandInteraction, container: Container) {
@@ -135,24 +142,21 @@ export async function handleModelsCommand(interaction: ChatInputCommandInteracti
   const env = container.env;
   const diagnostics = container.aiService.getLastDiagnostics();
   const capabilities = container.aiProvider.getCapabilities(env.aiModel);
-  await interaction.editReply(
-    [
-      `Provider: ${diagnostics.provider}`,
-      `Model: ${env.aiModel}`,
-      `Fallback: ${env.aiFallbackModel ?? 'none'}`,
-      `Temperature: ${env.aiTemperature}`,
-      `Max tokens: ${env.aiMaxTokens}`,
-      `Context window: ${env.aiContextWindowTokens}`,
-      `Streaming: ${env.aiStreamingEnabled}`,
-      `Web search: ${diagnostics.effectiveSearch.status}`,
-      `Search mode: ${env.aiWebSearch.mode}`,
-      `Search max_keyword: ${env.aiWebSearch.maxKeyword}`,
-      `Search limit: ${env.aiWebSearch.limit}`,
-      `Supports web search: ${capabilities.supportsWebSearch}`,
-      `Supports thinking: ${capabilities.supportsThinking}`,
-      `Supports annotations: ${capabilities.supportsAnnotations}`,
-    ].join('\n'),
-  );
+  await interaction.editReply(buildModelsDashboard({
+    provider: diagnostics.provider,
+    model: env.aiModel,
+    fallback: env.aiFallbackModel ?? 'none',
+    temperature: env.aiTemperature,
+    maxTokens: env.aiMaxTokens,
+    contextWindowTokens: env.aiContextWindowTokens,
+    streaming: env.aiStreamingEnabled,
+    webSearchStatus: diagnostics.effectiveSearch.status,
+    searchMode: env.aiWebSearch.mode,
+    searchLimit: env.aiWebSearch.limit,
+    supportsWebSearch: capabilities.supportsWebSearch,
+    supportsThinking: capabilities.supportsThinking,
+    supportsAnnotations: capabilities.supportsAnnotations,
+  }));
 }
 
 export async function handleDebugCommand(interaction: ChatInputCommandInteraction, container: Container) {
@@ -184,24 +188,22 @@ export async function handleDebugCommand(interaction: ChatInputCommandInteractio
   const metrics = container.metrics.getSnapshot();
   const storageHealth = container.storageMonitor.check();
 
-  await interaction.editReply(
-    [
-      `Memory RSS MB: ${(memory.rss / 1024 / 1024).toFixed(1)}`,
-      `Heap used MB: ${(memory.heapUsed / 1024 / 1024).toFixed(1)}`,
-      `Active channels: ${contextStats.activeChannels}`,
-      `Context messages: ${contextStats.messages}`,
-      `Context tokens: ${contextStats.estimatedTokens}`,
-      `User limiter keys: ${limiterStats.user.keys}`,
-      `Channel limiter keys: ${limiterStats.channel.keys}`,
-      `Mention limiter keys: ${limiterStats.mentionDaily.keys}`,
-      `Provider: ${diagnostics.provider}`,
-      `AI diagnostics count: ${container.aiService.getDiagnosticsHistory().length}`,
-      `Web search status: ${diagnostics.effectiveSearch.status}`,
-      `Last AI reason: ${diagnostics.lastDowngradeReason ?? 'none'}`,
-      `App search mode: ${container.searchService.getEffectiveMode()}`,
-      `App search diagnostics: ${JSON.stringify(searchDiagnostics)}`,
-      `Storage health: ${JSON.stringify(storageHealth)}`,
-      `Metrics: ${JSON.stringify(metrics)}`,
-    ].join('\n'),
-  );
+  await interaction.editReply(buildDebugDashboard({
+    memoryRssMb: (memory.rss / 1024 / 1024).toFixed(1),
+    heapUsedMb: (memory.heapUsed / 1024 / 1024).toFixed(1),
+    activeChannels: contextStats.activeChannels,
+    contextMessages: contextStats.messages,
+    contextTokens: contextStats.estimatedTokens,
+    userLimiterKeys: limiterStats.user.keys,
+    channelLimiterKeys: limiterStats.channel.keys,
+    mentionLimiterKeys: limiterStats.mentionDaily.keys,
+    provider: diagnostics.provider,
+    diagnosticsCount: container.aiService.getDiagnosticsHistory().length,
+    webSearchStatus: diagnostics.effectiveSearch.status,
+    lastAiReason: diagnostics.lastDowngradeReason ?? 'none',
+    appSearchMode: container.searchService.getEffectiveMode(),
+    searchDiagnostics,
+    storageHealth,
+    metrics,
+  }));
 }

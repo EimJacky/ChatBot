@@ -13,7 +13,7 @@ import type { AIService } from '../services/ai/AIService.js';
 import type { ContextManager } from '../services/context/ContextManager.js';
 import type { Tokenizer } from '../services/context/Tokenizer.js';
 import type { StreamingMessageHandler } from '../services/discord/StreamingMessageHandler.js';
-import { buildResponsePresentation } from '../services/discord/ResponsePresentation.js';
+import { buildErrorPresentation, buildResponsePresentation } from '../services/discord/ResponsePresentation.js';
 import type { BotRateLimiters } from '../services/rateLimit/RateLimiter.js';
 import type { PromptAugmentor } from '../services/search/PromptAugmentor.js';
 import { appendSearchSkipReason, type SearchService } from '../services/search/SearchService.js';
@@ -86,7 +86,7 @@ export class ChatUseCase {
     } catch (error) {
       this.metrics?.recordError();
       this.logger.error({ traceId, err: error }, 'chat interaction failed');
-      await stream.edit(interaction, userFacingError(error));
+      await stream.edit(interaction, buildErrorPresentation(userFacingError(error), errorCode(error)));
     }
     });
   }
@@ -155,11 +155,11 @@ export class ChatUseCase {
       this.logger.error({ traceId, err: error }, 'mention chat failed');
       const errorMessage = fitDiscordMessage(userFacingError(error));
       if (sent) {
-        await sent.edit(errorMessage);
+        await sent.edit(buildErrorPresentation(errorMessage, errorCode(error)));
         return;
       }
 
-      await message.reply(errorMessage);
+      await message.reply(buildErrorPresentation(errorMessage, errorCode(error)));
     } finally {
       clearTypingTimer(typingTimer);
     }
@@ -338,6 +338,10 @@ async function fetchInteractionReply(interaction: ChatInputCommandInteraction): 
 
 function isReactable(value: unknown): value is { react: (emoji: string) => Promise<unknown> } {
   return Boolean(value && typeof value === 'object' && 'react' in value && typeof value.react === 'function');
+}
+
+function errorCode(error: unknown): string {
+  return error instanceof AppError ? error.code : 'CHAT_FAILED';
 }
 
 function clearTypingTimer(timer: NodeJS.Timeout | undefined): void {
